@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -126,23 +127,19 @@ func run(args []string) error {
 		return fmt.Errorf("can't run a day in the future ... put the kettle on and come back in %d days", (365 * (*year - time.Now().Year() )) + (*day - time.Now().Day()))
 	}
 
-	yearsDays := getYearDayCombinations(*year, *day)
-	langs := getLangs(*lang)
+	// yearsDays := getYearDayCombinations(*year, *day)
+	// langs := getLangs(*lang)
 
 	cmds := []string{}
 
 	var c string
 	
-	for _, d := range yearsDays {
-		for _, l := range langs {
+	c = createCommand(d, l, true)
+	cmds = append(cmds, c)
 
-			c = createCommand(d, l, true)
-			cmds = append(cmds, c)
-
-			c = createCommand(d, l, false)
-			cmds = append(cmds, c)
-		}
-	}
+	c = createCommand(d, l, false)
+	cmds = append(cmds, c)
+	
 
 	for _, c := range cmds {
 		err := runCmd(c); if err != nil {
@@ -172,7 +169,7 @@ func createCommand(d struct{year int; day int}, l string, s bool) string {
 
 		yearDayLang := fmt.Sprintf(">> %d - day %d - %s <<", d.year, d.day, lang)
 		startEnd := strings.Repeat("=", 60 - len(yearDayLang) / 2)
-		return strings.Join([]string{"echo", startEnd, yearDayLang, startEnd}, " ")
+		return strings.Join([]string{"clear", "&&", "echo", startEnd, yearDayLang, startEnd}, " ")
 	}
 
 	if l == "py" {
@@ -240,17 +237,65 @@ func setup(args []string) {
 	fmt.Printf("inout=%s\n", input)
 }
 
-func submit(args []string) {
+func submit(args []string) error {
 	cmd := flag.NewFlagSet("submit", flag.ExitOnError)
 	year := cmd.Int("year", time.Now().Year(), "year")
 	day := cmd.Int("day", time.Now().Day(), "day")
-	part := cmd.Int("part", 1, "part")
+	part := cmd.String("part", "1", "part")
+    answer := cmd.String("answer", "", "answer")
 	cmd.Parse(args)
 
-	fmt.Println("submitting with args:")
-	fmt.Printf("year=%d\n", *year)
-	fmt.Printf("day=%d\n", *day)
-	fmt.Printf("part=%d\n", *part)
+    url := fmt.Sprintf("https://adventofcode.com/%d/day/%d/answer", *year, *day)
+    session_cookie := os.Getenv("AOC_COOKIE")
+
+    data, err := json.Marshal(map[string]string{"part": *part, "answer": *answer})
+    if err != nil {
+        fmt.Println("could not package up the answer")
+        return err
+    }
+    req, err := http.NewRequest("POST", url, nil)
+    if err != nil {
+        fmt.Println("could not create request")
+        return err
+    }
+    req.AddCookie(&http.Cookie{Name: "session", Value: session_cookie})
+    req.Header.Set("data", string(data))
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        fmt.Println("failed to post answer")
+        return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != 200 {
+        err = fmt.Errorf("request failed, StatusCode=%d", resp.StatusCode)
+        return err
+    }
+
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return errors.New("could not read response body")
+    }
+    
+    goodAnswer := "That's the right answer!"
+    badAnswer := "That's not the right answer"
+    wrongLevel := "You don't seem to be solving the right level"
+    tooSoon := "You gave an answer too recently"
+    
+
+    if strings.Contains(string(body), goodAnswer) {
+        fmt.Println(goodAnswer)
+        return nil
+    }
+
+    for _, e := range []string{badAnswer, wrongLevel, tooSoon} {
+        if strings.Contains(string(body), e) {
+            return errors.New(e)
+        }
+    }
+
+    return errors.New(string(body))
 }
 
 func runTest(args []string) {
